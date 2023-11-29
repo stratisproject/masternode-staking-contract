@@ -6,8 +6,7 @@ import "hardhat/console.sol";
 
 contract MasternodeStakingContract {
     uint256 public constant COLLATERAL_AMOUNT = 1000000 ether;
-    // TODO: replace with more accurate constant
-    uint256 public constant WITHDRAWAL_DELAY = 84000;
+    uint256 public constant WITHDRAWAL_DELAY = 100800;
 
     enum RegistrationStatus { UNREGISTERED, REGISTERED, WITHDRAWING }
 
@@ -59,17 +58,10 @@ contract MasternodeStakingContract {
 
         uint256 sinceLastClaim = block.number - lastClaimedBlock[msg.sender];
 
-        console.log(sinceLastClaim);
-        console.log(address(this).balance);
-        console.log(totalBlockShares);
-        console.log(totalCollateralAmount);
-
         // The contract's balance consists of both collateral amounts and the reward amounts added each block.
         // Therefore the collateral amounts have to be tracked separately from the overall balance and removed
         // from it prior to calculating the account's share of the rewards.
         uint256 claimAmount = (address(this).balance - totalCollateralAmount) * sinceLastClaim / totalBlockShares;
-
-        console.log(claimAmount);
 
         totalBlockShares -= sinceLastClaim;
         lastClaimedBlock[msg.sender] = block.number;
