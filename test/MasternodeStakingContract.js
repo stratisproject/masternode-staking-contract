@@ -144,6 +144,8 @@ describe("Masternode staking contract", function () {
 
       it("Should work for two registered accounts proportionally", async function () {
         const { masternodeContract, addr1, addr2 } = await loadFixture(deployTokenFixture);
+        
+        expect(await masternodeContract.totalBlockShares()).to.equal(0);
 
         await setBalance(await masternodeContract.getAddress(), ethers.parseEther("50"));
 
@@ -151,23 +153,53 @@ describe("Masternode staking contract", function () {
         expect(await masternodeContract.registrationStatus(addr1.address)).to.equal(0);
         expect(await masternodeContract.registrationStatus(addr2.address)).to.equal(0);
 
+        expect(await masternodeContract.checkBlockShares(addr1.address)).to.equal(0);
+        expect(await masternodeContract.checkBlockShares(addr2.address)).to.equal(0);
+
         await expect(
             masternodeContract.connect(addr1).register({ value: ethers.parseEther("1000000") })
             ).not.to.be.reverted;
-        
+
+        expect(await masternodeContract.totalBlockShares()).to.equal(0);
+
+        expect(await masternodeContract.checkBlockShares(addr1.address)).to.equal(0);
+        expect(await masternodeContract.checkBlockShares(addr2.address)).to.equal(0);
+
         expect(await masternodeContract.registrationStatus(addr1.address)).to.equal(1);
 
+        expect(await masternodeContract.totalRegistrations()).to.equal(1);
+
         mine(1);
+
+        // The total block shares would actually be 1 here, but since the block was mined there has been no contract action to force an update.
+        expect(await masternodeContract.totalBlockShares()).to.equal(0);
+
+        expect(await masternodeContract.checkBlockShares(addr1.address)).to.equal(1);
+        expect(await masternodeContract.checkBlockShares(addr2.address)).to.equal(0);
 
         await expect(
             masternodeContract.connect(addr2).register({ value: ethers.parseEther("1000000") })
             ).not.to.be.reverted;
         
+        // 1 block share from addr1's presence for the single mined block, the other for addr2 as a result of the block that mines this addr2 register() call.
+        expect(await masternodeContract.totalBlockShares()).to.equal(2);
+
         expect(await masternodeContract.registrationStatus(addr2.address)).to.equal(1);
+
+        expect(await masternodeContract.totalRegistrations()).to.equal(2);
+
+        expect(await masternodeContract.checkBlockShares(addr1.address)).to.equal(2);
+        expect(await masternodeContract.checkBlockShares(addr2.address)).to.equal(0);
 
         mine(2);
 
-        // At this point account 1 has 5 block shares out of a total 8, and account 2 has 3
+        // The total block shares would actually be 6 here (mining 2 blocks with 2 registered accounts = 4 block shares added), but since the blocks were mined there has been no contract action to force an update.
+        expect(await masternodeContract.totalBlockShares()).to.equal(2);
+
+        expect(await masternodeContract.checkBlockShares(addr1.address)).to.equal(4);
+        expect(await masternodeContract.checkBlockShares(addr2.address)).to.equal(2);
+
+        // When claimRewards() is executed account 1 should have 5 block shares out of a total 8, and account 2 should have 3
         const tx = masternodeContract.connect(addr1).claimRewards();
 
         await expect(tx).not.to.be.reverted;
@@ -175,12 +207,21 @@ describe("Masternode staking contract", function () {
         await expect(tx).to.changeEtherBalance(addr1, ethers.parseEther("31.25"));
         await expect(tx).to.changeEtherBalance(await masternodeContract.getAddress(), -ethers.parseEther("31.25"));
 
+        // The addr1 account should have its totalBlockShares removed from the overall count, so there should be only 3 left.
+        expect(await masternodeContract.totalBlockShares()).to.equal(3);
+        
+        expect(await masternodeContract.checkBlockShares(addr1.address)).to.equal(0);
+        expect(await masternodeContract.checkBlockShares(addr2.address)).to.equal(3);
+
+        expect(await masternodeContract.totalRegistrations()).to.equal(2);
+
+        // Going into the claimRewards method, addr2 should have 4 block shares out of a total of 5.
         const tx2 = masternodeContract.connect(addr2).claimRewards();
 
         await expect(tx2).not.to.be.reverted;
 
-        await expect(tx2).to.changeEtherBalance(addr2, ethers.parseEther("18.75"));
-        await expect(tx2).to.changeEtherBalance(await masternodeContract.getAddress(), -ethers.parseEther("18.75"));
+        await expect(tx2).to.changeEtherBalance(addr2, ethers.parseEther("15.00"));
+        await expect(tx2).to.changeEtherBalance(await masternodeContract.getAddress(), -ethers.parseEther("15.00"));
       });
     });
 

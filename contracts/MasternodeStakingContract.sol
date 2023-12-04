@@ -51,6 +51,22 @@ contract MasternodeStakingContract {
         emit Registration(msg.sender);
     }
 
+    function checkBlockShares(address masternodeAccount) public view returns (uint256) {
+        // This method is called without the preconditions that updateBlockShares() enforces, so it is possible that the
+        // account being queried is not registered.
+        if (registrationStatus[msg.sender] == RegistrationStatus.UNREGISTERED)
+        {
+            return 0;
+        }
+
+        if (lastClaimedBlock[masternodeAccount] == 0)
+        {
+            return 0;
+        }
+        
+        return block.number - lastClaimedBlock[masternodeAccount];
+    }
+
     function claimRewards() public {
         require(registrationStatus[msg.sender] == RegistrationStatus.REGISTERED, "Account not registered");
 
