@@ -1,12 +1,10 @@
 //SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.0;
-
-import "hardhat/console.sol";
+pragma solidity ^0.8.19;
 
 contract MasternodeStakingContract {
-    uint256 public constant COLLATERAL_AMOUNT = 1000000 ether;
-    uint256 public constant WITHDRAWAL_DELAY = 100800;
+    uint256 public constant COLLATERAL_AMOUNT = 1_000_000 ether;
+    uint256 public constant WITHDRAWAL_DELAY = 100_800;
 
     enum RegistrationStatus { UNREGISTERED, REGISTERED, WITHDRAWING }
 
@@ -20,9 +18,6 @@ contract MasternodeStakingContract {
 
     event Registration(address indexed _from);
     event Deregistration(address indexed _from);
-
-    error ImmatureRegistration();
-    error UnknownRegistrationStatus();
 
     constructor() {
         totalBlockShares = 0;
