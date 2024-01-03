@@ -1,6 +1,7 @@
 //SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.20;
+import "@openzeppelin/contracts/utils/Address.sol";
 
 contract MasternodeStakingContract {
     uint256 public constant COLLATERAL_AMOUNT = 1_000_000 ether;
@@ -46,10 +47,10 @@ contract MasternodeStakingContract {
         emit Registration(msg.sender);
     }
 
-    function checkBlockShares(address masternodeAccount) public view returns (uint256) {
+    function checkBlockShares(address masternodeAccount) external view returns (uint256) {
         // This method is called without the preconditions that updateBlockShares() enforces, so it is possible that the
         // account being queried is not registered.
-        if (registrationStatus[msg.sender] == RegistrationStatus.UNREGISTERED)
+        if (registrationStatus[masternodeAccount] == RegistrationStatus.UNREGISTERED)
         {
             return 0;
         }
@@ -67,17 +68,33 @@ contract MasternodeStakingContract {
 
         updateBlockShares();
 
+        if (totalBlockShares == 0)
+        {
+            return;
+        }
+
         uint256 sinceLastClaim = block.number - lastClaimedBlock[msg.sender];
+
+        if (sinceLastClaim == 0)
+        {
+            return;
+        }
 
         // The contract's balance consists of both collateral amounts and the reward amounts added each block.
         // Therefore the collateral amounts have to be tracked separately from the overall balance and removed
         // from it prior to calculating the account's share of the rewards.
         uint256 claimAmount = (address(this).balance - totalCollateralAmount) * sinceLastClaim / totalBlockShares;
 
+        if (claimAmount == 0)
+        {
+            return;
+        }
+
         totalBlockShares -= sinceLastClaim;
         lastClaimedBlock[msg.sender] = block.number;
 
-        payable(msg.sender).transfer(claimAmount);
+        // Amount is transferred only after the last claimed block has been reset for the claimer, preventing re-entrancy.
+        Address.sendValue(payable(msg.sender), claimAmount);
     }
 
     function startWithdrawal() external {
@@ -102,7 +119,7 @@ contract MasternodeStakingContract {
 
         totalCollateralAmount -= COLLATERAL_AMOUNT;
 
-        payable(msg.sender).transfer(COLLATERAL_AMOUNT);
+        Address.sendValue(payable(msg.sender), COLLATERAL_AMOUNT);
     }
 
     function updateBlockShares() internal {

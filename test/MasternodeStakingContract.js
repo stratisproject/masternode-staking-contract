@@ -300,7 +300,7 @@ describe("Masternode staking contract", function () {
                 .withArgs(addr1.address);
             
             // Need to take into account that the transactions above are also advancing the chain.
-            mine(100800 - 2);
+            mine(100800 - 3);
 
             await expect(
                 masternodeContract.connect(addr1).completeWithdrawal()
