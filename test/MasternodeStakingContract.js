@@ -8,16 +8,19 @@ const {
 
 describe("Masternode staking contract", function () {
     async function deployTokenFixture() {
-        const [addr1, addr2] = await ethers.getSigners();
+        const [addr1, addr2, addr10k, addr50k] = await ethers.getSigners();
 
+        // The contract will be deployed in the genesis block directly on the physical network(s), but treating it as a regular deployment is sufficient for testing purposes.
         const masternodeContract = await ethers.deployContract("MasternodeStakingContract");
     
         await masternodeContract.waitForDeployment();
     
+        await masternodeContract.assignLegacyAccounts([addr10k.address], [addr50k.address]);
+
         setBalance(addr1.address, ethers.parseEther("5000000"));
         setBalance(addr2.address, ethers.parseEther("5000000"));
 
-        return { masternodeContract, addr1, addr2 };
+        return { masternodeContract, addr1, addr2, addr10k, addr50k };
     }
 
     describe("Deployment", function () {
