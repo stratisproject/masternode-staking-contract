@@ -4,6 +4,14 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/utils/Address.sol";
 
 contract MasternodeStakingContract {
+    struct Account {
+        uint256 balance;
+        uint256 lastDividends;
+        uint256 lastClaimedBlock;
+    }
+
+    mapping(address=>Account) public accounts;
+
     // Collateral amount for regular registrations.
     uint256 public constant COLLATERAL_AMOUNT = 1_000_000 ether;
 
@@ -19,13 +27,13 @@ contract MasternodeStakingContract {
 
     bool public initialized;
 
-    uint256 public totalBlockShares;
-    uint256 public lastBlock;
+    uint256 public totalDividends;
     uint256 public totalRegistrations;
     uint256 public totalCollateralAmount;
+    uint256 public lastBalance;
+    uint256 public withdrawingCollateralAmount;
 
     mapping(address => RegistrationStatus) public registrationStatus;
-    mapping(address => uint256) public lastClaimedBlock;
     mapping(address => bool) public legacy10K;
     mapping(address => bool) public legacy50K;
 
@@ -34,7 +42,7 @@ contract MasternodeStakingContract {
 
     // This contract is intended to be deployed directly into the genesis block, so a constructor cannot be used.
     // In any case, we assume that all the variables defined above will be their type-specific default values until explicitly set.
-    // Only one instance of the contract is intended to ever be in existence, as the masternode rewards are minted directly to the contract's address as assigned in the genesis.json.
+    // Only one instance of the contract is intended to ever be in existence, as the masternode rewards are minted directly to the contract's address as assigned in the genesis block.
 
     function assignLegacyAccounts(address[] memory legacy10Kaccounts, address[] memory legacy50Kaccounts) public {
         // This method does not contain any access control logic as it would serve very little purpose.
@@ -74,7 +82,7 @@ contract MasternodeStakingContract {
         }
         else if (legacy50K[msg.sender])
         {
-            require(msg.value == COLLATERAL_AMOUNT_50K, "Incorrect collateral amount for legacy 50k node");
+            require(msg.value == COLLATERAL_AMOUNT_50K, "Incorrect collateral amount for legacy 50K node");
         }
         else
         {
@@ -83,32 +91,51 @@ contract MasternodeStakingContract {
         
         require(registrationStatus[msg.sender] == RegistrationStatus.UNREGISTERED, "Account already registered");
 
-        lastClaimedBlock[msg.sender] = block.number;
+        update(msg.value);
+
+        accounts[msg.sender].balance = 0;
+        accounts[msg.sender].lastDividends = totalDividends;
+        accounts[msg.sender].lastClaimedBlock = block.number;
+        
         registrationStatus[msg.sender] = RegistrationStatus.REGISTERED;
-
-        // The new registration is not considered part of the total registrations yet, so update the total block shares before incrementing.
-        updateBlockShares();
-
+        
         totalRegistrations += 1;
         totalCollateralAmount += msg.value;
 
         emit Registration(msg.sender);
     }
 
-    function checkBlockShares(address masternodeAccount) external view returns (uint256) {
-        // This method is called without the preconditions that updateBlockShares() enforces, so it is possible that the
-        // account being queried is not registered.
-        if (registrationStatus[masternodeAccount] == RegistrationStatus.UNREGISTERED)
+    function dividendsOwing(address account) internal view returns(uint256) {
+        uint256 newDividends = totalDividends - accounts[account].lastDividends;
+
+        return newDividends;
+    }
+
+    function update(uint256 registrationOffset) internal {
+        // Calculate the accrued rewards since the last time update() was called.
+
+        // Update disbursed rewards. Note that this is independent of the number of blocks since the last time rewards were claimed, and relates only to the changes in the contract balance.
+        uint256 amount = address(this).balance - lastBalance - totalCollateralAmount - withdrawingCollateralAmount - registrationOffset;
+
+        if (totalRegistrations > 0)
         {
-            return 0;
+            // All categories of registered accounts are treated as having identical 'staking' amounts for the purposes of dividing up the rewards.
+            totalDividends += (amount / totalRegistrations);
+            lastBalance += amount;
         }
 
-        if (lastClaimedBlock[masternodeAccount] == 0)
+        if (registrationOffset > 0)
         {
-            return 0;
+            return;
         }
-        
-        return block.number - lastClaimedBlock[masternodeAccount];
+
+        uint256 owing = dividendsOwing(msg.sender);
+
+        if (owing > 0)
+        {
+            accounts[msg.sender].balance += owing;
+            accounts[msg.sender].lastDividends = totalDividends;
+        }
     }
 
     function claimRewards() public {
@@ -116,34 +143,13 @@ contract MasternodeStakingContract {
 
         require(registrationStatus[msg.sender] == RegistrationStatus.REGISTERED, "Account not registered");
 
-        updateBlockShares();
+        update(0);
 
-        if (totalBlockShares == 0)
-        {
-            return;
-        }
+        uint256 claimAmount = accounts[msg.sender].balance;
+        accounts[msg.sender].balance -= claimAmount;
+        accounts[msg.sender].lastClaimedBlock = block.number;
+        lastBalance -= claimAmount;
 
-        uint256 sinceLastClaim = block.number - lastClaimedBlock[msg.sender];
-
-        if (sinceLastClaim == 0)
-        {
-            return;
-        }
-
-        // The contract's balance consists of both collateral amounts and the reward amounts added each block.
-        // Therefore the collateral amounts have to be tracked separately from the overall balance and removed
-        // from it prior to calculating the account's share of the rewards.
-        uint256 claimAmount = (address(this).balance - totalCollateralAmount) * sinceLastClaim / totalBlockShares;
-
-        if (claimAmount == 0)
-        {
-            return;
-        }
-
-        totalBlockShares -= sinceLastClaim;
-        lastClaimedBlock[msg.sender] = block.number;
-
-        // Amount is transferred only after the last claimed block has been reset for the claimer, preventing re-entrancy.
         Address.sendValue(payable(msg.sender), claimAmount);
     }
 
@@ -154,7 +160,27 @@ contract MasternodeStakingContract {
         // Note that claimRewards checks the registration status.
         claimRewards();
 
+        // They will not be eligible for any rewards during the withdrawal delay period, so we need to adjust the total registrations now.
         totalRegistrations -= 1;
+
+        uint256 applicableCollateral;
+        if (legacy10K[msg.sender])
+        {
+            applicableCollateral = COLLATERAL_AMOUNT_10K;
+        }
+        else if (legacy50K[msg.sender])
+        {
+            applicableCollateral = COLLATERAL_AMOUNT_50K;
+        }
+        else
+        {
+            applicableCollateral = COLLATERAL_AMOUNT;
+        }
+
+        // We need this account's collateral to no longer be considered part of the contract's overall balance, but the funds have not actually left yet.
+        // Therefore we have to keep the 'in progress' withdrawal accumulated in a variable so that it can be offset within future reward updates.
+        withdrawingCollateralAmount += applicableCollateral;
+        totalCollateralAmount -= applicableCollateral;
 
         registrationStatus[msg.sender] = RegistrationStatus.WITHDRAWING;
 
@@ -163,46 +189,30 @@ contract MasternodeStakingContract {
 
     function completeWithdrawal() external {
         require(registrationStatus[msg.sender] == RegistrationStatus.WITHDRAWING, "Account has not started the withdrawal process");
-        require((block.number - lastClaimedBlock[msg.sender]) >= WITHDRAWAL_DELAY, "Withdrawal delay has not yet elapsed");
+        require((block.number - accounts[msg.sender].lastClaimedBlock) >= WITHDRAWAL_DELAY, "Withdrawal delay has not yet elapsed");
 
-        // Free up the storage used to track the last block this account claimed rewards.
-        delete lastClaimedBlock[msg.sender];
-        delete registrationStatus[msg.sender];
-
-        uint256 applicableCollateralAmount;
-
+        uint256 remainingBalance;
         if (legacy10K[msg.sender])
         {
-            applicableCollateralAmount = COLLATERAL_AMOUNT_10K;
+            remainingBalance = COLLATERAL_AMOUNT_10K;
 
             // Once a legacy 10K account de-registers they are not eligible to re-register with the relaxed collateral requirements.
             delete legacy10K[msg.sender];
         }
         else if (legacy50K[msg.sender])
         {
-            applicableCollateralAmount = COLLATERAL_AMOUNT_50K;
+            remainingBalance = COLLATERAL_AMOUNT_50K;
 
             // Once a legacy 50K account de-registers they are not eligible to re-register with the relaxed collateral requirements.
             delete legacy50K[msg.sender];
         }
-        else
-        {
-            applicableCollateralAmount = COLLATERAL_AMOUNT;
-        }
 
-        totalCollateralAmount -= applicableCollateralAmount;
+        withdrawingCollateralAmount -= remainingBalance;
 
-        Address.sendValue(payable(msg.sender), applicableCollateralAmount);
-    }
+        // Free up storage.
+        delete registrationStatus[msg.sender];
+        delete accounts[msg.sender];
 
-    function updateBlockShares() internal {
-        // Must only perform these updates once per block at most.
-        if (lastBlock == block.number)
-        {
-            return;
-        }
-
-        totalBlockShares += (totalRegistrations * (block.number - lastBlock));
-        lastBlock = block.number;
+        Address.sendValue(payable(msg.sender), remainingBalance);
     }
 }
