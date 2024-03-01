@@ -424,9 +424,12 @@ describe("Masternode staking contract", function () {
             
             mine(100800);
 
-            await expect(
-                masternodeContract.connect(addr1).completeWithdrawal()
-                ).not.to.be.reverted;
+            const tx = masternodeContract.connect(addr1).completeWithdrawal();
+
+            await expect(tx).not.to.be.reverted;
+
+            await expect(tx).to.changeEtherBalance(addr1, ethers.parseEther("1000000"));
+            await expect(tx).to.changeEtherBalance(await masternodeContract.getAddress(), -ethers.parseEther("1000000"));
         });
     });
 

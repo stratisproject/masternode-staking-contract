@@ -44,7 +44,7 @@ contract MasternodeStakingContract {
     // In any case, we assume that all the variables defined above will be their type-specific default values until explicitly set.
     // Only one instance of the contract is intended to ever be in existence, as the masternode rewards are minted directly to the contract's address as assigned in the genesis block.
 
-    function assignLegacyAccounts(address[] memory legacy10Kaccounts, address[] memory legacy50Kaccounts) public {
+    function assignLegacyAccounts(address[] calldata legacy10Kaccounts, address[] calldata legacy50Kaccounts) public {
         // This method does not contain any access control logic as it would serve very little purpose.
         // As the contract is deployed in the genesis block, this method can be called by the entity initializing the network prior to making the network public.
         // For example, the legacy accounts can be assigned in the next block after genesis, after which no further changes are allowed.
@@ -146,6 +146,12 @@ contract MasternodeStakingContract {
         update(0);
 
         uint256 claimAmount = accounts[msg.sender].balance;
+
+        if (claimAmount == 0)
+        {
+            return;
+        }
+
         accounts[msg.sender].balance -= claimAmount;
         accounts[msg.sender].lastClaimedBlock = block.number;
         lastBalance -= claimAmount;
@@ -191,28 +197,32 @@ contract MasternodeStakingContract {
         require(registrationStatus[msg.sender] == RegistrationStatus.WITHDRAWING, "Account has not started the withdrawal process");
         require((block.number - accounts[msg.sender].lastClaimedBlock) >= WITHDRAWAL_DELAY, "Withdrawal delay has not yet elapsed");
 
-        uint256 remainingBalance;
+        uint256 applicableCollateral;
         if (legacy10K[msg.sender])
         {
-            remainingBalance = COLLATERAL_AMOUNT_10K;
+            applicableCollateral = COLLATERAL_AMOUNT_10K;
 
             // Once a legacy 10K account de-registers they are not eligible to re-register with the relaxed collateral requirements.
             delete legacy10K[msg.sender];
         }
         else if (legacy50K[msg.sender])
         {
-            remainingBalance = COLLATERAL_AMOUNT_50K;
+            applicableCollateral = COLLATERAL_AMOUNT_50K;
 
             // Once a legacy 50K account de-registers they are not eligible to re-register with the relaxed collateral requirements.
             delete legacy50K[msg.sender];
         }
+        else
+        {
+            applicableCollateral = COLLATERAL_AMOUNT;
+        }
 
-        withdrawingCollateralAmount -= remainingBalance;
+        withdrawingCollateralAmount -= applicableCollateral;
 
         // Free up storage.
         delete registrationStatus[msg.sender];
         delete accounts[msg.sender];
 
-        Address.sendValue(payable(msg.sender), remainingBalance);
+        Address.sendValue(payable(msg.sender), applicableCollateral);
     }
 }
