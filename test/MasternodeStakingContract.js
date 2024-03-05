@@ -8,7 +8,7 @@ const {
 
 describe("Masternode staking contract", function () {
     async function deployTokenFixture() {
-        const [addr1, addr2, addr3, addr10k, addr50k] = await ethers.getSigners();
+        const [addr1, addr2, addr3, addrLegacy] = await ethers.getSigners();
 
         const masternodeContract = await ethers.deployContract("MasternodeStakingContract");
     
@@ -17,12 +17,11 @@ describe("Masternode staking contract", function () {
         setBalance(addr1.address, ethers.parseEther("5000000"));
         setBalance(addr2.address, ethers.parseEther("5000000"));
         setBalance(addr3.address, ethers.parseEther("5000000"));
-        setBalance(addr10k.address, ethers.parseEther("5000000"));
-        setBalance(addr50k.address, ethers.parseEther("5000000"));
+        setBalance(addrLegacy.address, ethers.parseEther("5000000"));
 
-        await masternodeContract.assignLegacyAccounts([addr10k], [addr50k]);
+        await masternodeContract.assignLegacyAccounts([addrLegacy]);
 
-        return { masternodeContract, addr1, addr2, addr3, addr10k, addr50k };
+        return { masternodeContract, addr1, addr2, addr3, addrLegacy };
     }
 
     describe("Deployment", function () {
@@ -435,158 +434,103 @@ describe("Masternode staking contract", function () {
 
     describe("Legacy collateral", function () {
         it("Shouldn't work for legacy account with no collateral", async function () {
-            const { masternodeContract, addr10k, addr50k } = await loadFixture(deployTokenFixture);
+            const { masternodeContract, addrLegacy } = await loadFixture(deployTokenFixture);
 
             await expect(
-                masternodeContract.connect(addr10k).register()
-                ).to.be.revertedWith("Incorrect collateral amount for legacy 10K node");
+                masternodeContract.connect(addrLegacy).register()
+                ).to.be.revertedWith("Incorrect collateral amount for legacy node");
 
-            await expect(
-                masternodeContract.connect(addr50k).register()
-                ).to.be.revertedWith("Incorrect collateral amount for legacy 50K node");
-                
             expect(await masternodeContract.totalRegistrations()).to.equal(0);
         });
 
         it("Shouldn't work for legacy account with insufficient collateral", async function () {
-            const { masternodeContract, addr10k, addr50k } = await loadFixture(deployTokenFixture);
+            const { masternodeContract, addrLegacy } = await loadFixture(deployTokenFixture);
 
             await expect(
-                masternodeContract.connect(addr10k).register({ value: ethers.parseEther("99999") })
-                ).to.be.revertedWith("Incorrect collateral amount for legacy 10K node");
+                masternodeContract.connect(addrLegacy).register({ value: ethers.parseEther("99999") })
+                ).to.be.revertedWith("Incorrect collateral amount for legacy node");
 
-            await expect(
-                masternodeContract.connect(addr50k).register({ value: ethers.parseEther("499999") })
-                ).to.be.revertedWith("Incorrect collateral amount for legacy 50K node");
-    
             expect(await masternodeContract.totalRegistrations()).to.equal(0);
         });
 
         it("Shouldn't work for legacy account with too much collateral", async function () {
-            const { masternodeContract, addr10k, addr50k } = await loadFixture(deployTokenFixture);
+            const { masternodeContract, addrLegacy } = await loadFixture(deployTokenFixture);
 
             await expect(
-                masternodeContract.connect(addr10k).register({ value: ethers.parseEther("100001") })
-                ).to.be.revertedWith("Incorrect collateral amount for legacy 10K node");
+                masternodeContract.connect(addrLegacy).register({ value: ethers.parseEther("100001") })
+                ).to.be.revertedWith("Incorrect collateral amount for legacy node");
 
-            await expect(
-                masternodeContract.connect(addr50k).register({ value: ethers.parseEther("500001") })
-                ).to.be.revertedWith("Incorrect collateral amount for legacy 50K node");
-    
             expect(await masternodeContract.totalRegistrations()).to.equal(0);
         });
 
         it("Should work for legacy account with correct collateral", async function () {
-            const { masternodeContract, addr10k, addr50k } = await loadFixture(deployTokenFixture);
+            const { masternodeContract, addrLegacy } = await loadFixture(deployTokenFixture);
 
             // Initially unregistered.
-            expect(await masternodeContract.registrationStatus(addr10k.address)).to.equal(0);
-            expect(await masternodeContract.registrationStatus(addr50k.address)).to.equal(0);
+            expect(await masternodeContract.registrationStatus(addrLegacy.address)).to.equal(0);
 
-            const tx = masternodeContract.connect(addr10k).register({ value: ethers.parseEther("100000") });
+            const tx = masternodeContract.connect(addrLegacy).register({ value: ethers.parseEther("100000") });
 
             await expect(tx).to.emit(masternodeContract, "Registration")
-                .withArgs(addr10k.address);
+                .withArgs(addrLegacy.address);
             
-            await expect(tx).to.changeEtherBalance(addr10k, -ethers.parseEther("100000"));
+            await expect(tx).to.changeEtherBalance(addrLegacy, -ethers.parseEther("100000"));
 
-            expect(await masternodeContract.registrationStatus(addr10k.address)).to.equal(1);
+            expect(await masternodeContract.registrationStatus(addrLegacy.address)).to.equal(1);
 
-            const tx2 = masternodeContract.connect(addr50k).register({ value: ethers.parseEther("500000") });
-
-            await expect(tx2).to.emit(masternodeContract, "Registration")
-                .withArgs(addr50k.address);
-            
-            await expect(tx2).to.changeEtherBalance(addr50k, -ethers.parseEther("500000"));
-
-            expect(await masternodeContract.registrationStatus(addr50k.address)).to.equal(1);
-
-            expect(await masternodeContract.totalRegistrations()).to.equal(2);
+            expect(await masternodeContract.totalRegistrations()).to.equal(1);
         });
 
         it("Shouldn't work a second time for an already registered legacy account", async function () {
-            const { masternodeContract, addr10k, addr50k } = await loadFixture(deployTokenFixture);
+            const { masternodeContract, addrLegacy, addr50k } = await loadFixture(deployTokenFixture);
 
             // Initially unregistered.
-            expect(await masternodeContract.registrationStatus(addr10k.address)).to.equal(0);
-            expect(await masternodeContract.registrationStatus(addr50k.address)).to.equal(0);
+            expect(await masternodeContract.registrationStatus(addrLegacy.address)).to.equal(0);
 
             await expect(
-                masternodeContract.connect(addr10k).register({ value: ethers.parseEther("100000") })
+                masternodeContract.connect(addrLegacy).register({ value: ethers.parseEther("100000") })
                 ).not.to.be.reverted;
 
-            expect(await masternodeContract.registrationStatus(addr10k.address)).to.equal(1);
+            expect(await masternodeContract.registrationStatus(addrLegacy.address)).to.equal(1);
 
             await expect(
-                masternodeContract.connect(addr10k).register({ value: ethers.parseEther("100000") })
+                masternodeContract.connect(addrLegacy).register({ value: ethers.parseEther("100000") })
                 ).to.be.revertedWith("Account already registered");
 
             // Shouldn't have affected registration status; the account was registered already.
-            expect(await masternodeContract.registrationStatus(addr10k.address)).to.equal(1);
+            expect(await masternodeContract.registrationStatus(addrLegacy.address)).to.equal(1);
+
+            expect(await masternodeContract.totalRegistrations()).to.equal(1);
+        });
+
+        it("Should get legacy collateral amount when withdrawing", async function () {
+            const { masternodeContract, addrLegacy } = await loadFixture(deployTokenFixture);
+
+            expect(await masternodeContract.registrationStatus(addrLegacy.address)).to.equal(0);
+
+            await expect(
+                masternodeContract.connect(addrLegacy).register({ value: ethers.parseEther("100000") })
+                ).not.to.be.reverted;
+
+            expect(await masternodeContract.registrationStatus(addrLegacy.address)).to.equal(1);
 
             expect(await masternodeContract.totalRegistrations()).to.equal(1);
 
             await expect(
-                masternodeContract.connect(addr50k).register({ value: ethers.parseEther("500000") })
-                ).not.to.be.reverted;
-
-            expect(await masternodeContract.registrationStatus(addr50k.address)).to.equal(1);
-
-            await expect(
-                masternodeContract.connect(addr50k).register({ value: ethers.parseEther("500000") })
-                ).to.be.revertedWith("Account already registered");
-
-            // Shouldn't have affected registration status; the account was registered already.
-            expect(await masternodeContract.registrationStatus(addr50k.address)).to.equal(1);
-
-            expect(await masternodeContract.totalRegistrations()).to.equal(2);
-        });
-
-        it("Should get legacy collateral amount when withdrawing", async function () {
-            const { masternodeContract, addr10k, addr50k } = await loadFixture(deployTokenFixture);
-
-            expect(await masternodeContract.registrationStatus(addr10k.address)).to.equal(0);
-
-            await expect(
-                masternodeContract.connect(addr10k).register({ value: ethers.parseEther("100000") })
-                ).not.to.be.reverted;
-
-            await expect(
-                masternodeContract.connect(addr50k).register({ value: ethers.parseEther("500000") })
-                ).not.to.be.reverted;
-
-            expect(await masternodeContract.registrationStatus(addr10k.address)).to.equal(1);
-            expect(await masternodeContract.registrationStatus(addr50k.address)).to.equal(1);
-
-            expect(await masternodeContract.totalRegistrations()).to.equal(2);
-
-            await expect(
-                masternodeContract.connect(addr10k).startWithdrawal()
+                masternodeContract.connect(addrLegacy).startWithdrawal()
                 ).to.emit(masternodeContract, "Deregistration")
-                .withArgs(addr10k.address);
-
-            await expect(
-                masternodeContract.connect(addr50k).startWithdrawal()
-                ).to.emit(masternodeContract, "Deregistration")
-                .withArgs(addr50k.address);
+                .withArgs(addrLegacy.address);
     
             expect(await masternodeContract.totalRegistrations()).to.equal(0);
 
             mine(100800);
 
-            const tx = masternodeContract.connect(addr10k).completeWithdrawal();
+            const tx = masternodeContract.connect(addrLegacy).completeWithdrawal();
 
             await expect(tx).not.to.be.reverted;
 
-            await expect(tx).to.changeEtherBalance(addr10k, ethers.parseEther("100000"));
+            await expect(tx).to.changeEtherBalance(addrLegacy, ethers.parseEther("100000"));
             await expect(tx).to.changeEtherBalance(await masternodeContract.getAddress(), -ethers.parseEther("100000"));
-
-            const tx2 = masternodeContract.connect(addr50k).completeWithdrawal();
-
-            await expect(tx2).not.to.be.reverted;
-
-            await expect(tx2).to.changeEtherBalance(addr50k, ethers.parseEther("500000"));
-            await expect(tx2).to.changeEtherBalance(await masternodeContract.getAddress(), -ethers.parseEther("500000"));
         });
     });
 });

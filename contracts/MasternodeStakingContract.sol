@@ -15,11 +15,8 @@ contract MasternodeStakingContract {
     // Collateral amount for regular registrations.
     uint256 public constant COLLATERAL_AMOUNT = 1_000_000 ether;
 
-    // Collateral amount for legacy '10K' registrations.
-    uint256 public constant COLLATERAL_AMOUNT_10K = 100_000 ether;
-
-    // Collateral amount for legacy '50K' registrations.
-    uint256 public constant COLLATERAL_AMOUNT_50K = 500_000 ether;
+    // Collateral amount for legacy registrations.
+    uint256 public constant COLLATERAL_AMOUNT_LEGACY = 100_000 ether;
 
     uint256 public constant WITHDRAWAL_DELAY = 100_800;
 
@@ -34,8 +31,7 @@ contract MasternodeStakingContract {
     uint256 public withdrawingCollateralAmount;
 
     mapping(address => RegistrationStatus) public registrationStatus;
-    mapping(address => bool) public legacy10K;
-    mapping(address => bool) public legacy50K;
+    mapping(address => bool) public legacy;
 
     event Registration(address indexed _from);
     event Deregistration(address indexed _from);
@@ -44,45 +40,31 @@ contract MasternodeStakingContract {
     // In any case, we assume that all the variables defined above will be their type-specific default values until explicitly set.
     // Only one instance of the contract is intended to ever be in existence, as the masternode rewards are minted directly to the contract's address as assigned in the genesis block.
 
-    function assignLegacyAccounts(address[] calldata legacy10Kaccounts, address[] calldata legacy50Kaccounts) public {
+    function assignLegacyAccounts(address[] calldata legacyAccounts) public {
         // This method does not contain any access control logic as it would serve very little purpose.
         // As the contract is deployed in the genesis block, this method can be called by the entity initializing the network prior to making the network public.
         // For example, the legacy accounts can be assigned in the next block after genesis, after which no further changes are allowed.
-        // The mappings only need to be populated by the time the first masternode account wishes to register, so that it can be determined whether or not they are considered legacy.
+        // The mapping only needs to be populated by the time the first masternode account wishes to register, so that it can be determined whether or not they are considered legacy.
 
         require(!initialized, "Legacy accounts can only be set once");
         
-        for (uint i = 0; i < legacy10Kaccounts.length; i++)
+        for (uint i = 0; i < legacyAccounts.length; i++)
         {
-            if (legacy10Kaccounts[i] == address(0))
+            if (legacyAccounts[i] == address(0))
             {
                 continue;
             }
 
-            legacy10K[legacy10Kaccounts[i]] = true;
-        }
-
-        for (uint i = 0; i < legacy50Kaccounts.length; i++)
-        {
-            if (legacy50Kaccounts[i] == address(0))
-            {
-                continue;
-            }
-
-            legacy50K[legacy50Kaccounts[i]] = true;
+            legacy[legacyAccounts[i]] = true;
         }
 
         initialized = true;
     }
 
     function register() external payable {
-        if (legacy10K[msg.sender])
+        if (legacy[msg.sender])
         {
-            require(msg.value == COLLATERAL_AMOUNT_10K, "Incorrect collateral amount for legacy 10K node");
-        }
-        else if (legacy50K[msg.sender])
-        {
-            require(msg.value == COLLATERAL_AMOUNT_50K, "Incorrect collateral amount for legacy 50K node");
+            require(msg.value == COLLATERAL_AMOUNT_LEGACY, "Incorrect collateral amount for legacy node");
         }
         else
         {
@@ -147,13 +129,14 @@ contract MasternodeStakingContract {
 
         uint256 claimAmount = accounts[msg.sender].balance;
 
+        accounts[msg.sender].lastClaimedBlock = block.number;
+
         if (claimAmount == 0)
         {
             return;
         }
 
         accounts[msg.sender].balance -= claimAmount;
-        accounts[msg.sender].lastClaimedBlock = block.number;
         lastBalance -= claimAmount;
 
         Address.sendValue(payable(msg.sender), claimAmount);
@@ -170,13 +153,9 @@ contract MasternodeStakingContract {
         totalRegistrations -= 1;
 
         uint256 applicableCollateral;
-        if (legacy10K[msg.sender])
+        if (legacy[msg.sender])
         {
-            applicableCollateral = COLLATERAL_AMOUNT_10K;
-        }
-        else if (legacy50K[msg.sender])
-        {
-            applicableCollateral = COLLATERAL_AMOUNT_50K;
+            applicableCollateral = COLLATERAL_AMOUNT_LEGACY;
         }
         else
         {
@@ -198,19 +177,12 @@ contract MasternodeStakingContract {
         require((block.number - accounts[msg.sender].lastClaimedBlock) >= WITHDRAWAL_DELAY, "Withdrawal delay has not yet elapsed");
 
         uint256 applicableCollateral;
-        if (legacy10K[msg.sender])
+        if (legacy[msg.sender])
         {
-            applicableCollateral = COLLATERAL_AMOUNT_10K;
+            applicableCollateral = COLLATERAL_AMOUNT_LEGACY;
 
-            // Once a legacy 10K account de-registers they are not eligible to re-register with the relaxed collateral requirements.
-            delete legacy10K[msg.sender];
-        }
-        else if (legacy50K[msg.sender])
-        {
-            applicableCollateral = COLLATERAL_AMOUNT_50K;
-
-            // Once a legacy 50K account de-registers they are not eligible to re-register with the relaxed collateral requirements.
-            delete legacy50K[msg.sender];
+            // Once a legacy account de-registers they are not eligible to re-register with the relaxed collateral requirements.
+            delete legacy[msg.sender];
         }
         else
         {
