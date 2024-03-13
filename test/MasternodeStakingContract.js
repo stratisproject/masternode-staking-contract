@@ -273,9 +273,44 @@ describe("Masternode staking contract", function () {
 
             await expect(tx2).to.changeEtherBalance(addr2, ethers.parseEther("25.00"));
             await expect(tx2).to.changeEtherBalance(await masternodeContract.getAddress(), -ethers.parseEther("25.00"));
-            });
+        });
 
-            it("Should work for three registered accounts proportionally", async function () {
+        it("Should leave remainder in contract for next disbursement", async function () {
+            const { masternodeContract, addr1, addr2 } = await loadFixture(deployTokenFixture);
+
+            // Initially unregistered.
+            expect(await masternodeContract.registrationStatus(addr1.address)).to.equal(0);
+            expect(await masternodeContract.registrationStatus(addr2.address)).to.equal(0);
+
+            await masternodeContract.connect(addr1).register({ value: ethers.parseEther("1000000") });
+            expect(await masternodeContract.totalRegistrations()).to.equal(1);
+            await masternodeContract.connect(addr2).register({ value: ethers.parseEther("1000000") });
+            expect(await masternodeContract.totalRegistrations()).to.equal(2);
+            expect(await masternodeContract.registrationStatus(addr1.address)).to.equal(1);
+            expect(await masternodeContract.registrationStatus(addr2.address)).to.equal(1);
+
+            // Registration 1 (1m) + registration 2 (1m) + 3 wei rewards (to be distributed)
+            await setBalance(await masternodeContract.getAddress(), ethers.parseEther("2000000.000000000000000003"));
+
+            // Expected result: both accounts were registered prior to the addition of 3 wei to be distributed,
+            // so if they both subsequently claim then each should receive 1 wei.
+
+            const tx = masternodeContract.connect(addr1).claimRewards();
+
+            await expect(tx).not.to.be.reverted;
+
+            await expect(tx).to.changeEtherBalance(addr1, ethers.parseEther("0.000000000000000001"));
+            await expect(tx).to.changeEtherBalance(await masternodeContract.getAddress(), -ethers.parseEther("0.000000000000000001"));
+
+            const tx2 = masternodeContract.connect(addr2).claimRewards();
+
+            await expect(tx2).not.to.be.reverted;
+
+            await expect(tx2).to.changeEtherBalance(addr2, ethers.parseEther("0.000000000000000001"));
+            await expect(tx2).to.changeEtherBalance(await masternodeContract.getAddress(), -ethers.parseEther("0.000000000000000001"));
+        });
+
+        it("Should work for three registered accounts proportionally", async function () {
             const { masternodeContract, addr1, addr2, addr3 } = await loadFixture(deployTokenFixture);
 
             await masternodeContract.connect(addr1).register({ value: ethers.parseEther("1000000") });

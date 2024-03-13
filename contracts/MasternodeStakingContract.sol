@@ -102,8 +102,11 @@ contract MasternodeStakingContract {
         if (totalRegistrations > 0)
         {
             // All categories of registered accounts are treated as having identical 'staking' amounts for the purposes of dividing up the rewards.
-            totalDividends += (amount / totalRegistrations);
-            lastBalance += amount;
+            uint256 dividends = amount / totalRegistrations; 
+            totalDividends += dividends;
+            // It is possible that there are a few wei that could not be evenly distributed amongst the accounts. So we only increase lastBalance by the amount that was actually distributed.
+            // This should leave the remainder in the contract to be distributed in the next call to update().
+            lastBalance += (dividends * totalRegistrations);
         }
 
         if (registrationOffset > 0)
