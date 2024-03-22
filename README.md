@@ -4,6 +4,6 @@ The Masternode Contract can be interacted with via the Masternode dApp: https://
 
 ## Audit
 
-CertiK: Awaiting publication
+CertiK: https://skynet.certik.com/projects/stratisplatform?auditId=Stratis%20-%20Masternode%20Staking#code-security
 
 Zokyo: Awaiting publication
