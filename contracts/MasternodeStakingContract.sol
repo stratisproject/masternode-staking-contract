@@ -1,8 +1,11 @@
 //SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.20;
+pragma solidity 0.8.20;
+
 import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract MasternodeStakingContract {
     struct Account {
@@ -42,10 +45,15 @@ contract MasternodeStakingContract {
     uint256 public totalTokensBalance;
     mapping(address => address) public accountRegisterToken;
     mapping(address => bool) public supportedTokens;
+    address public pendingOwner;
 
     event Registration(address indexed _from);
     event Deregistration(address indexed _from);
     event SetSupportedToken(address indexed _token, bool _supported);
+    event OwnershipTransferStarted(
+        address indexed previousOwner,
+        address indexed newOwner
+    );
     event OwnershipTransferred(
         address indexed previousOwner,
         address indexed newOwner
@@ -73,7 +81,7 @@ contract MasternodeStakingContract {
 
         require(!initialized, "Legacy accounts can only be set once");
 
-        for (uint i = 0; i < legacyAccounts.length; i++) {
+        for (uint256 i = 0; i < legacyAccounts.length; i++) {
             if (legacyAccounts[i] == address(0)) {
                 continue;
             }
@@ -110,7 +118,12 @@ contract MasternodeStakingContract {
         );
 
         if (token != address(0)) {
-            IERC20(token).transferFrom(msg.sender, address(this), amount);
+            SafeERC20.safeTransferFrom(
+                IERC20(token),
+                msg.sender,
+                address(this),
+                amount
+            );
             totalTokensBalance += amount;
         }
 
@@ -146,13 +159,14 @@ contract MasternodeStakingContract {
             withdrawingCollateralAmount -
             registrationOffset;
 
-        if (totalRegistrations > 0) {
+        uint256 registrations = totalRegistrations;
+        if (registrations > 0) {
             // All categories of registered accounts are treated as having identical 'staking' amounts for the purposes of dividing up the rewards.
-            uint256 dividends = amount / totalRegistrations;
+            uint256 dividends = amount / registrations;
             totalDividends += dividends;
             // It is possible that there are a few wei that could not be evenly distributed amongst the accounts. So we only increase lastBalance by the amount that was actually distributed.
             // This should leave the remainder in the contract to be distributed in the next call to update().
-            lastBalance += (dividends * totalRegistrations);
+            lastBalance += (dividends * registrations);
         }
 
         if (registrationOffset > 0) {
@@ -250,7 +264,11 @@ contract MasternodeStakingContract {
 
         if (token != address(0)) {
             totalTokensBalance -= applicableCollateral;
-            IERC20(token).transfer(msg.sender, applicableCollateral);
+            SafeERC20.safeTransfer(
+                IERC20(token),
+                msg.sender,
+                applicableCollateral
+            );
         } else {
             Address.sendValue(payable(msg.sender), applicableCollateral);
         }
@@ -260,14 +278,23 @@ contract MasternodeStakingContract {
         address token,
         bool supported
     ) external onlyOwner {
+        require(
+            IERC20Metadata(token).decimals() == 18,
+            "Token must have 18 decimals"
+        );
         supportedTokens[token] = supported;
         emit SetSupportedToken(token, supported);
     }
 
     function transferOwnership(address newOwner) external onlyOwner {
-        require(newOwner != address(0), "New owner is the zero address");
+        pendingOwner = newOwner;
+        emit OwnershipTransferStarted(owner, newOwner);
+    }
+
+    function acceptOwnership() public virtual {
+        require(pendingOwner == msg.sender, "Not an owner");
         address oldOwner = owner;
-        owner = newOwner;
-        emit OwnershipTransferred(oldOwner, newOwner);
+        owner = msg.sender;
+        emit OwnershipTransferred(oldOwner, msg.sender);
     }
 }
