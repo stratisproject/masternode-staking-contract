@@ -149,6 +149,11 @@ contract MasternodeStakingContract {
     }
 
     function update(uint256 registrationOffset) internal {
+        // Do not calculate and distribute rewards until we have 20 nodes registered
+        if (totalRegistrations < 20) {
+            return;
+        }
+
         // Calculate the accrued rewards since the last time update() was called.
 
         // Update disbursed rewards. Note that this is independent of the number of blocks since the last time rewards were claimed, and relates only to the changes in the contract balance.
